@@ -24,6 +24,10 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <math.h>
+
+#include "lsm6dsl.h"
+#include "b_l475e_iot01a1_bus.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -36,6 +40,13 @@ typedef struct
 	float speed;
 	uint8_t validFix;
 } GPS_Data_t;
+
+
+// Alert Message
+typedef struct
+{
+    uint32_t alertType;
+} AlertMessage_t;
 
 /* USER CODE END PTD */
 
@@ -62,12 +73,19 @@ typedef struct
 #define GEOFENCE_LON      74.3587f
 #define GEOFENCE_RADIUS   100.0f
 
+// Accelorometer
+#define LSM6DSL_ADDR        (0x6A << 1)
+#define WHO_AM_I_REG        0x0F
+
+// motion Threshold
+#define MOTION_THRESHOLD 100
+
+
+
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
 DFSDM_Channel_HandleTypeDef hdfsdm1_channel1;
-
-I2C_HandleTypeDef hi2c2;
 
 QSPI_HandleTypeDef hqspi;
 
@@ -149,13 +167,31 @@ static uint8_t toggleLocation = 0;
 
 static uint8_t outsideCount = 0;
 
+// Vraibles for LSM6DSL
+LSM6DSL_Object_t MotionSensor;
+volatile uint32_t dataRdyIntReceived;
+
+
+// to store prev accel values
+int32_t prevX = 0;
+int32_t prevY = 0;
+int32_t prevZ = 0;
+
+
+// motion Debouncing
+
+uint32_t lastMotionTick = 0;
+
+
+// breach aleart timer
+uint8_t alertActive = 0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DFSDM1_Init(void);
-static void MX_I2C2_Init(void);
 static void MX_QUADSPI_Init(void);
 static void MX_SPI3_Init(void);
 static void MX_USART1_UART_Init(void);
@@ -193,6 +229,16 @@ float deg2rad(float deg)
     return deg * (3.14159265359f / 180.0f);
 }
 
+
+// for testing GPS Simulation function
+
+void SimulateGPSFix(GPS_Data_t *gps)
+{
+    gps->latitude = 31.5300f;
+    gps->longitude = 74.4000f;
+    gps->validFix = 1;
+}
+
 // GeoFence Function
 
 float calculateDistance(float def_lat, float def_lon , float new_lat, float new_lon)
@@ -217,7 +263,45 @@ float calculateDistance(float def_lat, float def_lon , float new_lat, float new_
 }
 
 
+// MEMS Init
 
+static void MEMS_Init(void)
+{
+    LSM6DSL_IO_t io_ctx;
+    uint8_t id;
+    LSM6DSL_AxesRaw_t axes;
+
+    io_ctx.BusType = LSM6DSL_I2C_BUS;
+    io_ctx.Address = LSM6DSL_I2C_ADD_L;
+    io_ctx.Init = BSP_I2C2_Init;
+    io_ctx.DeInit = BSP_I2C2_DeInit;
+    io_ctx.ReadReg = BSP_I2C2_ReadReg;
+    io_ctx.WriteReg = BSP_I2C2_WriteReg;
+    io_ctx.GetTick = BSP_GetTick;
+
+    LSM6DSL_RegisterBusIO(&MotionSensor, &io_ctx);
+
+    LSM6DSL_ReadID(&MotionSensor, &id);
+
+    printf("LSM6DSL ID = 0x%02X\r\n", id);
+
+    if(id != LSM6DSL_ID)
+    {
+        printf("Sensor not found!\r\n");
+        Error_Handler();
+    }
+
+    LSM6DSL_Init(&MotionSensor);
+
+    LSM6DSL_ACC_SetOutputDataRate(&MotionSensor, 26.0f);
+    LSM6DSL_ACC_SetFullScale(&MotionSensor, 4);
+
+    LSM6DSL_ACC_Set_INT1_DRDY(&MotionSensor, ENABLE);
+
+    LSM6DSL_ACC_GetAxesRaw(&MotionSensor, &axes);
+
+    LSM6DSL_ACC_Enable(&MotionSensor);
+}
 
 
 /* USER CODE END 0 */
@@ -251,7 +335,6 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DFSDM1_Init();
-  MX_I2C2_Init();
   MX_QUADSPI_Init();
   MX_SPI3_Init();
   MX_USART1_UART_Init();
@@ -259,6 +342,7 @@ int main(void)
   MX_USB_OTG_FS_PCD_Init();
   /* USER CODE BEGIN 2 */
 
+  MEMS_Init();
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -278,7 +362,7 @@ int main(void)
 
   /* Create the timer(s) */
   /* creation of gpsTimeoutTimer */
-  gpsTimeoutTimerHandle = osTimerNew(gpsTimerCallback01, osTimerPeriodic, NULL, &gpsTimeoutTimer_attributes);
+  gpsTimeoutTimerHandle = osTimerNew(gpsTimerCallback01, osTimerOnce, NULL, &gpsTimeoutTimer_attributes);
 
   /* USER CODE BEGIN RTOS_TIMERS */
   /* start timers, add new ones, ... */
@@ -427,54 +511,6 @@ static void MX_DFSDM1_Init(void)
   /* USER CODE BEGIN DFSDM1_Init 2 */
 
   /* USER CODE END DFSDM1_Init 2 */
-
-}
-
-/**
-  * @brief I2C2 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_I2C2_Init(void)
-{
-
-  /* USER CODE BEGIN I2C2_Init 0 */
-
-  /* USER CODE END I2C2_Init 0 */
-
-  /* USER CODE BEGIN I2C2_Init 1 */
-
-  /* USER CODE END I2C2_Init 1 */
-  hi2c2.Instance = I2C2;
-  hi2c2.Init.Timing = 0x00000E14;
-  hi2c2.Init.OwnAddress1 = 0;
-  hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-  hi2c2.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-  hi2c2.Init.OwnAddress2 = 0;
-  hi2c2.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
-  hi2c2.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-  hi2c2.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-  if (HAL_I2C_Init(&hi2c2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Analogue filter
-  */
-  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c2, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Digital filter
-  */
-  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c2, 0) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN I2C2_Init 2 */
-
-  /* USER CODE END I2C2_Init 2 */
 
 }
 
@@ -678,6 +714,9 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOE, M24SR64_Y_RF_DISABLE_Pin|M24SR64_Y_GPO_Pin|ISM43362_RST_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOC, BUZZER_Pin|VL53L0X_XSHUT_Pin|LED3_WIFI__LED4_BLE_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, ARD_D10_Pin|SPBTLE_RF_RST_Pin|ARD_D9_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
@@ -689,9 +728,6 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(SPBTLE_RF_SPI3_CSN_GPIO_Port, SPBTLE_RF_SPI3_CSN_Pin, GPIO_PIN_SET);
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOC, VL53L0X_XSHUT_Pin|LED3_WIFI__LED4_BLE_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(SPSGRF_915_SPI3_CSN_GPIO_Port, SPSGRF_915_SPI3_CSN_Pin, GPIO_PIN_SET);
@@ -718,10 +754,17 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(BUTTON_EXTI13_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : ARD_A5_Pin ARD_A4_Pin ARD_A3_Pin ARD_A2_Pin
-                           ARD_A1_Pin ARD_A0_Pin */
-  GPIO_InitStruct.Pin = ARD_A5_Pin|ARD_A4_Pin|ARD_A3_Pin|ARD_A2_Pin
-                          |ARD_A1_Pin|ARD_A0_Pin;
+  /*Configure GPIO pins : BUZZER_Pin VL53L0X_XSHUT_Pin LED3_WIFI__LED4_BLE_Pin */
+  GPIO_InitStruct.Pin = BUZZER_Pin|VL53L0X_XSHUT_Pin|LED3_WIFI__LED4_BLE_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : ARD_A4_Pin ARD_A3_Pin ARD_A2_Pin ARD_A1_Pin
+                           ARD_A0_Pin */
+  GPIO_InitStruct.Pin = ARD_A4_Pin|ARD_A3_Pin|ARD_A2_Pin|ARD_A1_Pin
+                          |ARD_A0_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_ANALOG_ADC_CONTROL;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
@@ -797,13 +840,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : VL53L0X_XSHUT_Pin LED3_WIFI__LED4_BLE_Pin */
-  GPIO_InitStruct.Pin = VL53L0X_XSHUT_Pin|LED3_WIFI__LED4_BLE_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
-
   /*Configure GPIO pins : VL53L0X_GPIO1_EXTI7_Pin LSM3MDL_DRDY_EXTI8_Pin */
   GPIO_InitStruct.Pin = VL53L0X_GPIO1_EXTI7_Pin|LSM3MDL_DRDY_EXTI8_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
@@ -851,9 +887,9 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-    if(GPIO_Pin == GPIO_PIN_3)
+    if(GPIO_Pin == GPIO_PIN_11)
     {
-        osSemaphoreRelease(motionSemaphoreHandle);
+        dataRdyIntReceived++;
     }
 }
 /* USER CODE END 4 */
@@ -871,7 +907,52 @@ void StartDefaultTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+	  	static int32_t motion = 0;
+
+	    if(dataRdyIntReceived)
+	    {
+	        dataRdyIntReceived = 0;
+
+	        LSM6DSL_Axes_t acc_axes;
+
+	        LSM6DSL_ACC_GetAxes(&MotionSensor, &acc_axes);
+
+	        // calculate motion detection
+
+	        int32_t dx = abs(acc_axes.x - prevX);
+	        int32_t dy = abs(acc_axes.y - prevY);
+	        int32_t dz = abs(acc_axes.z - prevZ);
+
+	        motion = dx + dy + dz;
+
+	        prevX = acc_axes.x;
+	        prevY = acc_axes.y;
+	        prevZ = acc_axes.z;
+
+	        printf("X=%ld Y=%ld Z=%ld\r\n",
+	               acc_axes.x,
+	               acc_axes.y,
+	               acc_axes.z);
+
+	        printf("Motion=%ld\r\n", motion);
+	    }
+
+	    osDelay(10);
+
+	    if(motion > MOTION_THRESHOLD)
+	    {
+	        uint32_t now = HAL_GetTick();
+
+	        if((now - lastMotionTick) > 3000)
+	        {
+	            lastMotionTick = now;
+
+	            osSemaphoreRelease(motionSemaphoreHandle);
+	        }
+	    }
+
+	    osDelay(1000);
+
   }
   /* USER CODE END 5 */
 }
@@ -943,8 +1024,7 @@ void StartGPSTask(void *argument)
 //	    }
 
 
-        currentGPS.latitude = 31.5300f;
-        currentGPS.longitude = 74.4000f;
+	    SimulateGPSFix(&currentGPS);
 
 	    float distance =
 	        calculateDistance(
@@ -974,7 +1054,26 @@ void StartGPSTask(void *argument)
 
 	    if(outsideCount == 3)
 	    {
+
+	        AlertMessage_t msg;
+
+	        if(alertActive == 0)
+	        {
+	        	alertActive =1;
+
+	        msg.alertType = 1;
+
+	        osMessageQueuePut(
+	                alertQueueHandle,
+	                &msg,
+	                0,
+	                0);
+	        osTimerStart(
+	        		gpsTimeoutTimerHandle,
+					5000);
+
 	        printf("GEOFENCE BREACH!\r\n");
+	        }
 	    }
 
 
@@ -996,11 +1095,42 @@ void StartBuzzerTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
-	  printf("BUzzer Task Alive \r\n");
-	  printf("value of Motion bit %x \n", MOTION_DETECTED_BIT);
+//	  printf("BUzzer Task Alive \r\n");
+//	  printf("value of Motion bit %x \n", MOTION_DETECTED_BIT);
+//
+//	  osDelay(3000);
+//	  osSemaphoreRelease(motionSemaphoreHandle);
+	    uint32_t alert;
 
-	  osDelay(3000);
-	  osSemaphoreRelease(motionSemaphoreHandle);
+	    osMessageQueueGet(
+	            alertQueueHandle,
+	            &alert,
+	            NULL,
+	            osWaitForever);
+
+	    printf("BUZZER ALERT RECEIVED!\r\n");
+
+	    for(int i = 0; i < 5; i++)
+	    {
+	        HAL_GPIO_WritePin(LED2_GPIO_Port,
+	                          LED2_Pin,
+	                          GPIO_PIN_SET);
+
+	        for(int j = 0; j < 1000; j++)
+	        {
+	            HAL_GPIO_TogglePin(
+	                BUZZER_GPIO_Port,
+	                BUZZER_Pin);
+
+	            HAL_Delay(1);
+	        }
+
+	        HAL_GPIO_WritePin(LED2_GPIO_Port,
+	                          LED2_Pin,
+	                          GPIO_PIN_RESET);
+
+	        osDelay(200);
+	    }
   }
   /* USER CODE END StartBuzzerTask */
 }
@@ -1009,7 +1139,8 @@ void StartBuzzerTask(void *argument)
 void gpsTimerCallback01(void *argument)
 {
   /* USER CODE BEGIN gpsTimerCallback01 */
-
+    alertActive = 0;
+    printf("Alert Time out \r\n");
 
   /* USER CODE END gpsTimerCallback01 */
 }

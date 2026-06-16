@@ -70,8 +70,8 @@ void Error_Handler(void);
 #define BUTTON_EXTI13_Pin GPIO_PIN_13
 #define BUTTON_EXTI13_GPIO_Port GPIOC
 #define BUTTON_EXTI13_EXTI_IRQn EXTI15_10_IRQn
-#define ARD_A5_Pin GPIO_PIN_0
-#define ARD_A5_GPIO_Port GPIOC
+#define BUZZER_Pin GPIO_PIN_0
+#define BUZZER_GPIO_Port GPIOC
 #define ARD_A4_Pin GPIO_PIN_1
 #define ARD_A4_GPIO_Port GPIOC
 #define ARD_A3_Pin GPIO_PIN_2
