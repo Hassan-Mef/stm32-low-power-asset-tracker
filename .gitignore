@@ -1,0 +1,48 @@
+# STM32CubeIDE build folders
+Debug/
+Release/
+
+# Generated object files
+*.o
+*.d
+*.su
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+
+# CubeIDE settings
+.settings/
+
+# Eclipse metadata
+.metadata/
+*.launch
+
+# Temporary files
+*.tmp
+*.bak
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Debugger files
+*.stlink
+*.jlink
+
+# CMake (if you ever use it)
+build/
+CMakeFiles/
+CMakeCache.txt
+
+# VSCode (optional)
+.vscode/
+
+# Keil/IAR files (if not used)
+*.uvprojx
+*.uvoptx
+*.eww
+*.ewp
+*.ewd
