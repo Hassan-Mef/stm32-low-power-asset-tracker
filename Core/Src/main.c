@@ -994,7 +994,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 //	 printf("EXTI %d\r\n", GPIO_Pin);
     if(GPIO_Pin == GPIO_PIN_11)
     {
-        dataRdyIntReceived++;
+//        dataRdyIntReceived++
+    	 osSemaphoreRelease(
+    	            motionSemaphoreHandle);;
     }
 }
 /* USER CODE END 4 */
@@ -1012,15 +1014,15 @@ void StartDefaultTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
-
-	  static uint32_t counter = 0;
-
-	  counter++;
-
-	  if(counter % 500 == 0)
-	  {
-	      printf("Default Alive\r\n");
-	  }
+//
+//	  static uint32_t counter = 0;
+//
+//	  counter++;
+//
+//	  if(counter % 500 == 0)
+//	  {
+//	      printf("Default Alive\r\n");
+//	  }
 
 //	  	static int32_t motion = 0;
 //
@@ -1087,9 +1089,13 @@ void StartMotionTask(void *argument)
   {
 //	  	static int32_t motion = 0;
 
-	  	if(dataRdyIntReceived)
-	  	    {
-	  	        dataRdyIntReceived = 0;
+//	  	if(dataRdyIntReceived)
+//	  	    {
+//	  	        dataRdyIntReceived = 0;
+
+	  osSemaphoreAcquire(
+	        motionSemaphoreHandle,
+	        osWaitForever);
 
 	  	        LSM6DSL_Axes_t acc_axes;
 
@@ -1120,7 +1126,7 @@ void StartMotionTask(void *argument)
 	  	                    MOTION_DETECTED_BIT);
 	  	            }
 	  	        }
-	  	    }
+//	  	    }
 
 	  	    osDelay(10);
 
@@ -1155,16 +1161,17 @@ void StartGPSTask(void *argument)
 
 	printf("GPS Task Started\r\n");
 
-	  osEventFlagsWait(
-	          systemEventsHandle,
-	          MOTION_DETECTED_BIT,
-	          osFlagsWaitAny,
-	          osWaitForever);
-
-	      printf("GPS Activated\r\n");
 	//osDelay(3000);
   for(;;)
   {
+
+	  osEventFlagsWait(
+		          systemEventsHandle,
+		          MOTION_DETECTED_BIT,
+		          osFlagsWaitAny,
+		          osWaitForever);
+
+		      printf("GPS Activated\r\n");
 
 //	    if(timerFired)
 //	    {
@@ -1172,8 +1179,8 @@ void StartGPSTask(void *argument)
 //	        printf("Timer Fired!\r\n");
 //	    }
 
-
-
+		while(1)
+		{
 //	  printf("Loop\r\n");
       HAL_StatusTypeDef status =
               HAL_UART_Receive(&huart4,
@@ -1237,6 +1244,8 @@ void StartGPSTask(void *argument)
 
                       uint32_t now = HAL_GetTick();
                       printf("Tick = %lu\r\n", now);
+
+
                       if(outsideCount >= 3 &&
                          (now - lastAlertTime) > ALERT_COOLDOWN_MS)
                       {
@@ -1272,11 +1281,11 @@ void StartGPSTask(void *argument)
 
 
                       }
-
+        }
 
                   }
               }
-          }
+          
       }
       else if(status == HAL_TIMEOUT)
       {
@@ -1287,6 +1296,22 @@ void StartGPSTask(void *argument)
           printf("[UART ERROR]\r\n");
       }
 
+      // MOtion Timeout
+
+      if((HAL_GetTick() - lastMotionTick) > 10000)
+          {
+              printf("No Motion - GPS Sleep\r\n");
+              outsideCount = 0;
+
+              osEventFlagsClear(
+                  systemEventsHandle,
+                  MOTION_DETECTED_BIT);
+
+              break;
+          }
+
+
+    }
 
   }
   /* USER CODE END StartGPSTask */
@@ -1337,29 +1362,29 @@ void StartBuzzerTask(void *argument)
 
 
 
-//	    for(int i = 0; i < 5; i++)
-//	    {
-//	        HAL_GPIO_WritePin(LED2_GPIO_Port,
-//	                          LED2_Pin,
-//	                          GPIO_PIN_SET);
-//
-//	        for(int j = 0; j < 1000; j++)
-//	        {
-//	            HAL_GPIO_TogglePin(
-//	                BUZZER_GPIO_Port,
-//	                BUZZER_Pin);
-//
-//	            HAL_Delay(1);
-//	        }
-//
-//	        HAL_GPIO_WritePin(LED2_GPIO_Port,
-//	                          LED2_Pin,
-//	                          GPIO_PIN_RESET);
-//
-//	        osDelay(200);
-//	    }
+	    for(int i = 0; i < 5; i++)
+	    {
+	        HAL_GPIO_WritePin(LED2_GPIO_Port,
+	                          LED2_Pin,
+	                          GPIO_PIN_SET);
 
-	    osDelay(1000);
+	        for(int j = 0; j < 1000; j++)
+	        {
+	            HAL_GPIO_TogglePin(
+	                BUZZER_GPIO_Port,
+	                BUZZER_Pin);
+
+	            HAL_Delay(1);
+	        }
+
+	        HAL_GPIO_WritePin(LED2_GPIO_Port,
+	                          LED2_Pin,
+	                          GPIO_PIN_RESET);
+
+	        osDelay(200);
+	    }
+
+	    osDelay(500);
   }
   /* USER CODE END StartBuzzerTask */
 }
