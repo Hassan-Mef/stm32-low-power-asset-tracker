@@ -80,9 +80,14 @@ typedef struct
 #define WHO_AM_I_REG        0x0F
 
 // motion Threshold
-#define MOTION_THRESHOLD 100
+#define MOTION_THRESHOLD 20
 
 volatile uint8_t timerFired = 0;
+
+
+// cooldown
+
+#define ALERT_COOLDOWN_MS 60000
 
 /* USER CODE END PM */
 
@@ -985,6 +990,8 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
+
+//	 printf("EXTI %d\r\n", GPIO_Pin);
     if(GPIO_Pin == GPIO_PIN_11)
     {
         dataRdyIntReceived++;
@@ -1015,51 +1022,51 @@ void StartDefaultTask(void *argument)
 	      printf("Default Alive\r\n");
 	  }
 
-	  	static int32_t motion = 0;
+//	  	static int32_t motion = 0;
+//
+//	    if(dataRdyIntReceived)
+//	    {
+//	        dataRdyIntReceived = 0;
+//
+//	        LSM6DSL_Axes_t acc_axes;
+//
+//	        LSM6DSL_ACC_GetAxes(&MotionSensor, &acc_axes);
+//
+//	        // calculate motion detection
+//
+//	        int32_t dx = abs(acc_axes.x - prevX);
+//	        int32_t dy = abs(acc_axes.y - prevY);
+//	        int32_t dz = abs(acc_axes.z - prevZ);
+//
+//	        motion = dx + dy + dz;
+//
+//	        prevX = acc_axes.x;
+//	        prevY = acc_axes.y;
+//	        prevZ = acc_axes.z;
+//
+////	        printf("X=%ld Y=%ld Z=%ld\r\n",
+////	               acc_axes.x,
+////	               acc_axes.y,
+////	               acc_axes.z);
+//
+////	        printf("Motion=%ld\r\n", motion);
+//	    }
+//
+//	    osDelay(10);
+//
+//	    if(motion > MOTION_THRESHOLD)
+//	    {
+//	        uint32_t now = HAL_GetTick();
+//
+//	        if((now - lastMotionTick) > 3000)
+//	        {
+//	            lastMotionTick = now;
+//
+//	            osSemaphoreRelease(motionSemaphoreHandle);
+//	        }
+//	    }
 
-	    if(dataRdyIntReceived)
-	    {
-	        dataRdyIntReceived = 0;
-
-	        LSM6DSL_Axes_t acc_axes;
-
-	        LSM6DSL_ACC_GetAxes(&MotionSensor, &acc_axes);
-
-	        // calculate motion detection
-
-	        int32_t dx = abs(acc_axes.x - prevX);
-	        int32_t dy = abs(acc_axes.y - prevY);
-	        int32_t dz = abs(acc_axes.z - prevZ);
-
-	        motion = dx + dy + dz;
-
-	        prevX = acc_axes.x;
-	        prevY = acc_axes.y;
-	        prevZ = acc_axes.z;
-
-//	        printf("X=%ld Y=%ld Z=%ld\r\n",
-//	               acc_axes.x,
-//	               acc_axes.y,
-//	               acc_axes.z);
-
-//	        printf("Motion=%ld\r\n", motion);
-	    }
-
-	    osDelay(10);
-
-	    if(motion > MOTION_THRESHOLD)
-	    {
-	        uint32_t now = HAL_GetTick();
-
-	        if((now - lastMotionTick) > 3000)
-	        {
-	            lastMotionTick = now;
-
-	            osSemaphoreRelease(motionSemaphoreHandle);
-	        }
-	    }
-
-	   // osDelay(1000);
+	    osDelay(1000);
 
   }
   /* USER CODE END 5 */
@@ -1078,11 +1085,51 @@ void StartMotionTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
-	  osSemaphoreAcquire(motionSemaphoreHandle, osWaitForever);
-	  printf("Motion DETECTED \r\n");
+//	  	static int32_t motion = 0;
 
-	  osEventFlagsSet(systemEventsHandle, MOTION_DETECTED_BIT);
-	  osDelay(1000);
+	  	if(dataRdyIntReceived)
+	  	    {
+	  	        dataRdyIntReceived = 0;
+
+	  	        LSM6DSL_Axes_t acc_axes;
+
+	  	        LSM6DSL_ACC_GetAxes(&MotionSensor, &acc_axes);
+
+	  	        int32_t dx = abs(acc_axes.x - prevX);
+	  	        int32_t dy = abs(acc_axes.y - prevY);
+	  	        int32_t dz = abs(acc_axes.z - prevZ);
+
+	  	        int32_t motion = dx + dy + dz;
+
+	  	        prevX = acc_axes.x;
+	  	        prevY = acc_axes.y;
+	  	        prevZ = acc_axes.z;
+
+	  	        if(motion > MOTION_THRESHOLD)
+	  	        {
+	  	            uint32_t now = HAL_GetTick();
+
+	  	            if((now - lastMotionTick) > 3000)
+	  	            {
+	  	                lastMotionTick = now;
+
+	  	                printf("Motion DETECTED\r\n");
+
+	  	                osEventFlagsSet(
+	  	                    systemEventsHandle,
+	  	                    MOTION_DETECTED_BIT);
+	  	            }
+	  	        }
+	  	    }
+
+	  	    osDelay(10);
+
+
+//	  osSemaphoreAcquire(motionSemaphoreHandle, osWaitForever);
+//	  printf("Motion DETECTED \r\n");
+//
+//	  osEventFlagsSet(systemEventsHandle, MOTION_DETECTED_BIT);
+//	  osDelay(1000);
 
   }
   /* USER CODE END StartMotionTask */
@@ -1107,15 +1154,25 @@ void StartGPSTask(void *argument)
 //	uint32_t sentenceCount = 0;
 
 	printf("GPS Task Started\r\n");
-	osDelay(3000);
+
+	  osEventFlagsWait(
+	          systemEventsHandle,
+	          MOTION_DETECTED_BIT,
+	          osFlagsWaitAny,
+	          osWaitForever);
+
+	      printf("GPS Activated\r\n");
+	//osDelay(3000);
   for(;;)
   {
 
-	    if(timerFired)
-	    {
-	        timerFired = 0;
-	        printf("Timer Fired!\r\n");
-	    }
+//	    if(timerFired)
+//	    {
+//	        timerFired = 0;
+//	        printf("Timer Fired!\r\n");
+//	    }
+
+
 
 //	  printf("Loop\r\n");
       HAL_StatusTypeDef status =
@@ -1181,7 +1238,7 @@ void StartGPSTask(void *argument)
                       uint32_t now = HAL_GetTick();
                       printf("Tick = %lu\r\n", now);
                       if(outsideCount >= 3 &&
-                         (now - lastAlertTime) > 5000)
+                         (now - lastAlertTime) > ALERT_COOLDOWN_MS)
                       {
                     	  printf("Tick = %lu\r\n", now);
 
