@@ -24,6 +24,8 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <math.h>
+#include <string.h>
+#include <stdlib.h>
 
 #include "lsm6dsl.h"
 #include "b_l475e_iot01a1_bus.h"
@@ -80,7 +82,7 @@ typedef struct
 // motion Threshold
 #define MOTION_THRESHOLD 100
 
-
+volatile uint8_t timerFired = 0;
 
 /* USER CODE END PM */
 
@@ -116,14 +118,14 @@ osThreadId_t GPSTaskHandle;
 const osThreadAttr_t GPSTask_attributes = {
   .name = "GPSTask",
   .stack_size = 1024 * 4,
-  .priority = (osPriority_t) osPriorityBelowNormal,
+  .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for BuzzerTask */
 osThreadId_t BuzzerTaskHandle;
 const osThreadAttr_t BuzzerTask_attributes = {
   .name = "BuzzerTask",
   .stack_size = 256 * 4,
-  .priority = (osPriority_t) osPriorityLow,
+  .priority = (osPriority_t) osPriorityAboveNormal,
 };
 /* Definitions for alertQueue */
 osMessageQueueId_t alertQueueHandle;
@@ -192,6 +194,9 @@ uint8_t alertActive = 0;
 //char gpsLine[128];
 //uint32_t idx = 0;
 //uint8_t ch;
+
+//
+uint32_t lastAlertTime = 0;
 
 /* USER CODE END PV */
 
@@ -427,6 +432,8 @@ int main(void)
   /* Create the timer(s) */
   /* creation of gpsTimeoutTimer */
   gpsTimeoutTimerHandle = osTimerNew(gpsTimerCallback01, osTimerOnce, NULL, &gpsTimeoutTimer_attributes);
+  printf("Timer Handle = %p\r\n",
+         gpsTimeoutTimerHandle);
 
   /* USER CODE BEGIN RTOS_TIMERS */
   /* start timers, add new ones, ... */
@@ -998,51 +1005,61 @@ void StartDefaultTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
-//	  	static int32_t motion = 0;
-//
-//	    if(dataRdyIntReceived)
-//	    {
-//	        dataRdyIntReceived = 0;
-//
-//	        LSM6DSL_Axes_t acc_axes;
-//
-//	        LSM6DSL_ACC_GetAxes(&MotionSensor, &acc_axes);
-//
-//	        // calculate motion detection
-//
-//	        int32_t dx = abs(acc_axes.x - prevX);
-//	        int32_t dy = abs(acc_axes.y - prevY);
-//	        int32_t dz = abs(acc_axes.z - prevZ);
-//
-//	        motion = dx + dy + dz;
-//
-//	        prevX = acc_axes.x;
-//	        prevY = acc_axes.y;
-//	        prevZ = acc_axes.z;
-//
-////	        printf("X=%ld Y=%ld Z=%ld\r\n",
-////	               acc_axes.x,
-////	               acc_axes.y,
-////	               acc_axes.z);
-//
-////	        printf("Motion=%ld\r\n", motion);
-//	    }
-//
-//	    osDelay(10);
-//
-//	    if(motion > MOTION_THRESHOLD)
-//	    {
-//	        uint32_t now = HAL_GetTick();
-//
-//	        if((now - lastMotionTick) > 3000)
-//	        {
-//	            lastMotionTick = now;
-//
-//	            osSemaphoreRelease(motionSemaphoreHandle);
-//	        }
-//	    }
 
-	    osDelay(1000);
+	  static uint32_t counter = 0;
+
+	  counter++;
+
+	  if(counter % 500 == 0)
+	  {
+	      printf("Default Alive\r\n");
+	  }
+
+	  	static int32_t motion = 0;
+
+	    if(dataRdyIntReceived)
+	    {
+	        dataRdyIntReceived = 0;
+
+	        LSM6DSL_Axes_t acc_axes;
+
+	        LSM6DSL_ACC_GetAxes(&MotionSensor, &acc_axes);
+
+	        // calculate motion detection
+
+	        int32_t dx = abs(acc_axes.x - prevX);
+	        int32_t dy = abs(acc_axes.y - prevY);
+	        int32_t dz = abs(acc_axes.z - prevZ);
+
+	        motion = dx + dy + dz;
+
+	        prevX = acc_axes.x;
+	        prevY = acc_axes.y;
+	        prevZ = acc_axes.z;
+
+//	        printf("X=%ld Y=%ld Z=%ld\r\n",
+//	               acc_axes.x,
+//	               acc_axes.y,
+//	               acc_axes.z);
+
+//	        printf("Motion=%ld\r\n", motion);
+	    }
+
+	    osDelay(10);
+
+	    if(motion > MOTION_THRESHOLD)
+	    {
+	        uint32_t now = HAL_GetTick();
+
+	        if((now - lastMotionTick) > 3000)
+	        {
+	            lastMotionTick = now;
+
+	            osSemaphoreRelease(motionSemaphoreHandle);
+	        }
+	    }
+
+	   // osDelay(1000);
 
   }
   /* USER CODE END 5 */
@@ -1061,10 +1078,10 @@ void StartMotionTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
-//	  osSemaphoreAcquire(motionSemaphoreHandle, osWaitForever);
-////	  printf("Motion DETECTED \r\n");
-//
-//	  osEventFlagsSet(systemEventsHandle, MOTION_DETECTED_BIT);
+	  osSemaphoreAcquire(motionSemaphoreHandle, osWaitForever);
+	  printf("Motion DETECTED \r\n");
+
+	  osEventFlagsSet(systemEventsHandle, MOTION_DETECTED_BIT);
 	  osDelay(1000);
 
   }
@@ -1087,270 +1104,133 @@ void StartGPSTask(void *argument)
 	uint32_t idx = 0;
 	uint8_t ch;
 
-	uint32_t sentenceCount = 0;
+//	uint32_t sentenceCount = 0;
 
 	printf("GPS Task Started\r\n");
-	osDelay(5000);
+	osDelay(3000);
   for(;;)
   {
-//	  printf("GPS Task Alive \r\n");
-//	  osDelay(3000);
-//	    osEventFlagsWait(systemEventsHandle,
-//	                     MOTION_DETECTED_BIT,
-//	                     osFlagsWaitAny,
-//	                     osWaitForever);
 
-	   // demo testing
-//	    currentGPS.latitude = 31.5204f;
-//	    currentGPS.longitude = 74.3587f;
-//	    currentGPS.validFix = 1;
-//
-//	    printf("GPS Fix Acquired\r\n");
-//	    printf("Lat: %.4f\r\n", currentGPS.latitude);
-//	    printf("Lon: %.4f\r\n", currentGPS.longitude);
+	    if(timerFired)
+	    {
+	        timerFired = 0;
+	        printf("Timer Fired!\r\n");
+	    }
 
-//
-//	    if(toggleLocation == 0)
-//	    {
-//	        currentGPS.latitude = 31.5204f;
-//	        currentGPS.longitude = 74.3587f;
-//	        toggleLocation = 1;
-//	    }
-//	    else
-//	    {
-//	        currentGPS.latitude = 31.5300f;
-//	        currentGPS.longitude = 74.4000f;
-//	        toggleLocation = 0;
-////	    }
+//	  printf("Loop\r\n");
+      HAL_StatusTypeDef status =
+              HAL_UART_Receive(&huart4,
+                               &ch,
+                               1,
+                               1000);
 
+      if(status == HAL_OK)
+      {
+          if(ch != '\r' &&
+             ch != '\n' &&
+             idx < sizeof(line) - 1)
+          {
+              line[idx++] = ch;
+          }
+          else if(idx > 0)
+          {
+              line[idx] = '\0';
+              idx = 0;
 
-	  if(HAL_UART_Receive(&huart4,
-	                             &ch,
-	                             1,
-	                             HAL_MAX_DELAY) == HAL_OK)
-	  {
-		  if(ch == '\n')
-		  {
-		      line[idx] = '\0';
+              if(strstr(line, "$GPRMC") ||
+                 strstr(line, "$GNRMC"))
+              {
+                  parseGPRMC(line);
 
-		      printf("LINE=[%s]\r\n", line);
+                  if(currentGPS.validFix)
+                  {
+                      float distance =
+                          calculateDistance(
+                              GEOFENCE_LAT,
+                              GEOFENCE_LON,
+                              currentGPS.latitude,
+                              currentGPS.longitude);
 
-		      idx = 0;
-		  }
-		  else
-		  {
-		      if(idx < sizeof(line)-1)
-		      {
-		          line[idx++] = ch;
-		      }
-		  }
-	  }
+                      printf("\r\nGPS Fix Acquired\r\n");
 
-//	          }
+                      printf("Lat: %.6f\r\n",
+                             currentGPS.latitude);
 
-//
-//	  if(HAL_UART_Receive(&huart4,
-//	                          &ch,
-//	                          1,
-//	                          HAL_MAX_DELAY)
-//	          == HAL_OK)
-//	      {
-//	          if(ch == '\n')
-//	          {
-//	              line[idx] = '\0';
-//
-//	              printf("LINE=[%s]\r\n", line);
-//
-//	              if(strncmp(line, "$GPRMC", 6) == 0)
-//	              {
-//	                  parseGPRMC(line);
-//
-//	                  if(currentGPS.validFix)
-//	                  {
-//	                      printf("LAT=%.6f\r\n", currentGPS.latitude);
-//	                      printf("LON=%.6f\r\n", currentGPS.longitude);
-//	                  }
-//	              }
-//	              {
-//	                  parseGPRMC(line);
-//
-//	                  if(currentGPS.validFix)
-//	                  {
-//	                      printf("LAT=%.6f\r\n",
-//	                             currentGPS.latitude);
-//
-//	                      printf("LON=%.6f\r\n",
-//	                             currentGPS.longitude);
-//	                  }
-//	              }
-//
-//	              idx = 0;
-//	          }
-//	          else
-//	          {
-//	              if(idx < sizeof(line)-1)
-//	              {
-//	                  line[idx++] = ch;
-//	              }
-//	          }
-//	      }
+                      printf("Lon: %.6f\r\n",
+                             currentGPS.longitude);
+
+                      printf("Distance = %.2f m\r\n",
+                             distance);
+                      if(distance > GEOFENCE_RADIUS)
+                      {
+                    	  if(outsideCount < 3)
+                    	      {
+                    	          outsideCount++;
+                    	      }
+
+                          printf("Outside Count = %d\r\n",
+                                 outsideCount);
+                      }
+                      else
+                      {
+                          outsideCount = 0;
+                      }
 
 
-	  // working
+
+                      uint32_t now = HAL_GetTick();
+                      printf("Tick = %lu\r\n", now);
+                      if(outsideCount >= 3 &&
+                         (now - lastAlertTime) > 5000)
+                      {
+                    	  printf("Tick = %lu\r\n", now);
+
+                    	     lastAlertTime = now;
+
+                    	     printf("Last Alert = %lu\r\n", lastAlertTime);
+                          outsideCount = 0;
+
+                          printf("GEOFENCE BREACH!\r\n");
+
+                          uint32_t alert = 1;
+
+                          osMessageQueuePut(
+                              alertQueueHandle,
+                              &alert,
+                              0,
+                              0);
+//                    	    printf("GPS Queue = %p\r\n", alertQueueHandle);
+//
+//                    	    printf("Put status = %d\r\n", status);
+//
+//                    	    osStatus_t timerStatus =
+//                    	        osTimerStart(
+//                    	            gpsTimeoutTimerHandle,
+//                    	            5000);
+//
+//
+//                    	    printf("Timer Start = %d\r\n",
+//                    	           timerStatus);
 
 
-//      if(HAL_UART_Receive(&huart4,
-//                          &ch,
-//                          1,
-//                          HAL_MAX_DELAY) == HAL_OK)
-//      {
-//
-//    	  if(ch == '\n')
-//    	  {
-//    	      line[idx] = '\0';
-//
-//    	      sentenceCount++;
-//
-//    	      printf("COUNT=%lu\r\n", sentenceCount);
-//
-//    	      idx = 0;
-//    	  }
 
-//          if(ch == '\n')
-//          {
-//              line[idx] = '\0';
-//
-//              if(strncmp(line, "$GPRMC", 6) == 0)
-//              {
-//                  parseGPRMC(line);
-//
-//                  if(currentGPS.validFix)
-//                  {
-//                      printf("\r\n");
-//                      printf("LAT = %.6f\r\n",
-//                             currentGPS.latitude);
-//
-//                      printf("LON = %.6f\r\n",
-//                             currentGPS.longitude);
-//
-//                      float distance =
-//                          calculateDistance(
-//                              currentGPS.latitude,
-//                              currentGPS.longitude,
-//                              GEOFENCE_LAT,
-//                              GEOFENCE_LON);
-//
-//                      printf("Distance = %.2f m\r\n",
-//                             distance);
-//
-//                      if(distance > GEOFENCE_RADIUS)
-//                      {
-//                          outsideCount++;
-//
-//                          printf("OUTSIDE GEOFENCE\r\n");
-//                          printf("Outside Count = %d\r\n",
-//                                 outsideCount);
-//                      }
-//                      else
-//                      {
-//                          outsideCount = 0;
-//
-//                          printf("INSIDE GEOFENCE\r\n");
-//                      }
-//
-//                      if(outsideCount >= 3)
-//                      {
-//                          if(alertActive == 0)
-//                          {
-//                              AlertMessage_t msg;
-//
-//                              alertActive = 1;
-//
-//                              msg.alertType = 1;
-//
-//                              osMessageQueuePut(
-//                                      alertQueueHandle,
-//                                      &msg,
-//                                      0,
-//                                      0);
-//
-//                              osTimerStart(
-//                                      gpsTimeoutTimerHandle,
-//                                      5000);
-//
-//                              printf("GEOFENCE BREACH!\r\n");
-//                          }
-//                      }
-//                  }
-//              }
-//
-//              idx = 0;
-//          }
-//          else
-//          {
-//              if(idx < sizeof(line)-1)
-//              {
-//                  line[idx++] = ch;
-//              }
-//          }
-//      }
+                      }
 
 
-//
-//	    SimulateGPSFix(&currentGPS);
-//
-//	    float distance =
-//	        calculateDistance(
-//	            currentGPS.latitude,
-//	            currentGPS.longitude,
-//	            GEOFENCE_LAT,
-//	            GEOFENCE_LON);
-//
-//	    printf("Distance = %.2f m\r\n",
-//	           distance);
-//
-//
-//	    if(distance > GEOFENCE_RADIUS)
-//	    {
-//	        outsideCount++;
-//
-//	        printf("OUTSIDE GEOFENCE\r\n");
-//	        printf("Outside Count = %d\r\n",
-//	               outsideCount);
-//	    }
-//	    else
-//	    {
-//	        outsideCount = 0;
-//
-//	        printf("INSIDE GEOFENCE\r\n");
-//	    }
-//
-//	    if(outsideCount == 3)
-//	    {
-//
-//	        AlertMessage_t msg;
-//
-//	        if(alertActive == 0)
-//	        {
-//	        	alertActive =1;
-//
-//	        msg.alertType = 1;
-//
-//	        osMessageQueuePut(
-//	                alertQueueHandle,
-//	                &msg,
-//	                0,
-//	                0);
-//	        osTimerStart(
-//	        		gpsTimeoutTimerHandle,
-//					5000);
-//
-//	        printf("GEOFENCE BREACH!\r\n");
-//	        }
-//	    }
-//
-//
-//       osDelay(2000);
+                  }
+              }
+          }
+      }
+      else if(status == HAL_TIMEOUT)
+      {
+          printf(".");
+      }
+      else
+      {
+          printf("[UART ERROR]\r\n");
+      }
+
+
   }
   /* USER CODE END StartGPSTask */
 }
@@ -1366,23 +1246,40 @@ void StartBuzzerTask(void *argument)
 {
   /* USER CODE BEGIN StartBuzzerTask */
   /* Infinite loop */
+    uint32_t alert;
+    osStatus_t status;
+
+    printf("Buzzer Task Started\r\n");
   for(;;)
   {
-//	  printf("BUzzer Task Alive \r\n");
-//	  printf("value of Motion bit %x \n", MOTION_DETECTED_BIT);
+//	  printf("Waiting for alert...\r\n");
 //
-//	  osDelay(3000);
-//	  osSemaphoreRelease(motionSemaphoreHandle);
-//	    uint32_t alert;
+////	  printf("Count Before = %lu\r\n",
+//	         osMessageQueueGetCount(alertQueueHandle));
+
+	        status = osMessageQueueGet(
+	                    alertQueueHandle,
+	                    &alert,
+	                    NULL,
+	                    osWaitForever);
+
+//	        printf("GPS Queue = %p\r\n", alertQueueHandle);
+//	        printf("Count After Put = %lu\r\n",
+//	               osMessageQueueGetCount(alertQueueHandle));
 //
-//	    osMessageQueueGet(
-//	            alertQueueHandle,
-//	            &alert,
-//	            NULL,
-//	            osWaitForever);
-//
-//	    printf("BUZZER ALERT RECEIVED!\r\n");
-//
+//	        printf("Queue status = %d\r\n", status);
+
+	        if(status == osOK)
+	        {
+	            printf("BUZZER ALERT RECEIVED!\r\n");
+
+	            HAL_GPIO_TogglePin(
+	                    LED2_GPIO_Port,
+	                    LED2_Pin);
+	        }
+
+
+
 //	    for(int i = 0; i < 5; i++)
 //	    {
 //	        HAL_GPIO_WritePin(LED2_GPIO_Port,
@@ -1414,8 +1311,7 @@ void StartBuzzerTask(void *argument)
 void gpsTimerCallback01(void *argument)
 {
   /* USER CODE BEGIN gpsTimerCallback01 */
-    alertActive = 0;
-    printf("Alert Time out \r\n");
+
 
   /* USER CODE END gpsTimerCallback01 */
 }
