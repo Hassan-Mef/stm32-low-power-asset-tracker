@@ -34,15 +34,19 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+// improved GPS Structure
 typedef struct
 {
-	float latitude;
-	float longitude;
-	float speed;
-	uint8_t validFix;
-} GPS_Data_t;
+    float latitude;
+    float longitude;
+    float speed;
 
+    uint8_t validFix;
+
+    uint8_t fixQuality;
+    float hdop;
+
+} GPS_Data_t;
 
 // Alert Message
 typedef struct
@@ -319,13 +323,30 @@ void parseGPRMC(char *sentence)
     char ns;
     char ew;
 
+
+//    sscanf(sentence,
+//           "$GPRMC,%*[^,],%c,%f,%c,%f,%c",
+//           &status,
+//           &lat,
+//           &ns,
+//           &lon,
+//           &ew);
+
+    // new scanf
+
+    float speedKnots;
+
     sscanf(sentence,
-           "$GPRMC,%*[^,],%c,%f,%c,%f,%c",
+           "$GPRMC,%*[^,],%c,%f,%c,%f,%c,%f",
            &status,
            &lat,
            &ns,
            &lon,
-           &ew);
+           &ew,
+           &speedKnots);
+
+    currentGPS.speed =
+        speedKnots * 1.852f;
 
     if(status == 'A')
     {
@@ -347,6 +368,31 @@ void parseGPRMC(char *sentence)
     {
         currentGPS.validFix = 0;
     }
+}
+
+void parseGPGGA(char *sentence)
+{
+    float lat;
+    float lon;
+
+    char ns;
+    char ew;
+
+    int fixQuality;
+
+    float hdop;
+
+    sscanf(sentence,
+           "$GPGGA,%*[^,],%f,%c,%f,%c,%d,%*d,%f",
+           &lat,
+           &ns,
+           &lon,
+           &ew,
+           &fixQuality,
+           &hdop);
+
+    currentGPS.fixQuality = fixQuality;
+    currentGPS.hdop = hdop;
 }
 
 
@@ -1135,9 +1181,9 @@ void StartMotionTask(void *argument)
 	  	                lastMotionTick = now;
 
 	  	                printf("Motion DETECTED\r\n");
-
-	  	              printf("Cooldown Flag = %d\r\n",
-	  	                     alertCooldownActive);
+// -----DEBUGING ____
+//	  	              printf("Cooldown Flag = %d\r\n",
+//	  	                     alertCooldownActive);
 
 	  	                osEventFlagsSet(
 	  	                    systemEventsHandle,
@@ -1197,7 +1243,7 @@ void StartGPSTask(void *argument)
 
 		      osTimerStart(
 		          gpsFixTimerHandle,
-		          5000);   // or 20000 for testing
+		          120000);   // or 20000 for testing
 
 //	    if(timerFired)
 //	    {
@@ -1233,8 +1279,13 @@ void StartGPSTask(void *argument)
               {
                   parseGPRMC(line);
 
-                  //if(currentGPS.validFix)
-                  if(0)
+                  if(strstr(line, "$GPGGA") ||
+                     strstr(line, "$GNGGA"))
+                  {
+                      parseGPGGA(line);
+                  }
+
+                  if(currentGPS.validFix)
                   {
 
                 	    if(fixAcquired == 0)
@@ -1260,6 +1311,15 @@ void StartGPSTask(void *argument)
 
                       printf("Distance = %.2f m\r\n",
                              distance);
+
+                      printf("Speed = %.2f km/h\r\n",
+                             currentGPS.speed);
+
+                      printf("Fix Quality = %d\r\n",
+                             currentGPS.fixQuality);
+
+                      printf("HDOP = %.2f\r\n",
+                             currentGPS.hdop);
                       if(distance > GEOFENCE_RADIUS)
                       {
                     	  if(outsideCount < 3)
@@ -1276,13 +1336,13 @@ void StartGPSTask(void *argument)
                       }
 
 
+                      // -----DEBUGING ____
+//                      uint32_t now = HAL_GetTick();
+//                      printf("Tick = %lu\r\n", now);
 
-                      uint32_t now = HAL_GetTick();
-                      printf("Tick = %lu\r\n", now);
-
-
-                      printf("Cooldown=%d\r\n",
-                             alertCooldownActive);
+                      // -----DEBUGING ____
+//                      printf("Cooldown=%d\r\n",
+//                             alertCooldownActive);
 
                       if(outsideCount >= 3 &&
                          alertCooldownActive == 0)
@@ -1294,10 +1354,11 @@ void StartGPSTask(void *argument)
                     	  // reduce to 20 sec ofr testing
                     	  osStatus_t timerStatus = osTimerStart(
                     	      gpsTimeoutTimerHandle,
-                    	      20000);
+                    	      60000);
 
-                    	  printf("Timer Start Status = %d\r\n",
-                    	         timerStatus);
+                    	  // -----DEBUGING ____
+//                    	  printf("Timer Start Status = %d\r\n",
+//                    	         timerStatus);
 
                     	  printf("GEOFENCE BREACH!\r\n");
 
@@ -1351,7 +1412,7 @@ void StartGPSTask(void *argument)
       }
       else if(status == HAL_TIMEOUT)
       {
-          printf(".");
+//          printf(".");
       }
       else
       {
@@ -1360,7 +1421,7 @@ void StartGPSTask(void *argument)
 
       // MOtion Timeout
 
-      if((HAL_GetTick() - lastMotionTick) > 10000)
+      if((HAL_GetTick() - lastMotionTick) > 15000)
           {
               printf("No Motion - GPS Sleep\r\n");
               outsideCount = 0;
