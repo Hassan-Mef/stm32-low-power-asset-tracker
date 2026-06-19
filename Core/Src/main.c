@@ -89,6 +89,14 @@ volatile uint8_t timerFired = 0;
 
 #define ALERT_COOLDOWN_MS 60000
 
+// global flag for cooldown timer
+
+volatile uint8_t alertCooldownActive = 0;
+
+
+//
+
+volatile uint8_t gpsFixTimeout = 0;
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -141,6 +149,11 @@ const osMessageQueueAttr_t alertQueue_attributes = {
 osTimerId_t gpsTimeoutTimerHandle;
 const osTimerAttr_t gpsTimeoutTimer_attributes = {
   .name = "gpsTimeoutTimer"
+};
+/* Definitions for gpsFixTimer */
+osTimerId_t gpsFixTimerHandle;
+const osTimerAttr_t gpsFixTimer_attributes = {
+  .name = "gpsFixTimer"
 };
 /* Definitions for motionSemaphore */
 osSemaphoreId_t motionSemaphoreHandle;
@@ -220,6 +233,7 @@ void StartMotionTask(void *argument);
 void StartGPSTask(void *argument);
 void StartBuzzerTask(void *argument);
 void gpsTimerCallback01(void *argument);
+void gpsFixTimerCallback(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -437,8 +451,9 @@ int main(void)
   /* Create the timer(s) */
   /* creation of gpsTimeoutTimer */
   gpsTimeoutTimerHandle = osTimerNew(gpsTimerCallback01, osTimerOnce, NULL, &gpsTimeoutTimer_attributes);
-  printf("Timer Handle = %p\r\n",
-         gpsTimeoutTimerHandle);
+
+  /* creation of gpsFixTimer */
+  gpsFixTimerHandle = osTimerNew(gpsFixTimerCallback, osTimerOnce, NULL, &gpsFixTimer_attributes);
 
   /* USER CODE BEGIN RTOS_TIMERS */
   /* start timers, add new ones, ... */
@@ -1121,6 +1136,9 @@ void StartMotionTask(void *argument)
 
 	  	                printf("Motion DETECTED\r\n");
 
+	  	              printf("Cooldown Flag = %d\r\n",
+	  	                     alertCooldownActive);
+
 	  	                osEventFlagsSet(
 	  	                    systemEventsHandle,
 	  	                    MOTION_DETECTED_BIT);
@@ -1160,6 +1178,7 @@ void StartGPSTask(void *argument)
 //	uint32_t sentenceCount = 0;
 
 	printf("GPS Task Started\r\n");
+	static uint8_t fixAcquired = 0;
 
 	//osDelay(3000);
   for(;;)
@@ -1172,6 +1191,13 @@ void StartGPSTask(void *argument)
 		          osWaitForever);
 
 		      printf("GPS Activated\r\n");
+
+		      gpsFixTimeout = 0;
+		      fixAcquired = 0;
+
+		      osTimerStart(
+		          gpsFixTimerHandle,
+		          5000);   // or 20000 for testing
 
 //	    if(timerFired)
 //	    {
@@ -1187,6 +1213,7 @@ void StartGPSTask(void *argument)
                                &ch,
                                1,
                                1000);
+
 
       if(status == HAL_OK)
       {
@@ -1206,8 +1233,16 @@ void StartGPSTask(void *argument)
               {
                   parseGPRMC(line);
 
-                  if(currentGPS.validFix)
+                  //if(currentGPS.validFix)
+                  if(0)
                   {
+
+                	    if(fixAcquired == 0)
+                	    {
+                	        osTimerStop(gpsFixTimerHandle);
+                	        fixAcquired = 1;
+                	    }
+
                       float distance =
                           calculateDistance(
                               GEOFENCE_LAT,
@@ -1246,25 +1281,52 @@ void StartGPSTask(void *argument)
                       printf("Tick = %lu\r\n", now);
 
 
+                      printf("Cooldown=%d\r\n",
+                             alertCooldownActive);
+
                       if(outsideCount >= 3 &&
-                         (now - lastAlertTime) > ALERT_COOLDOWN_MS)
+                         alertCooldownActive == 0)
                       {
-                    	  printf("Tick = %lu\r\n", now);
+                    	  outsideCount = 0;
+                    	  alertCooldownActive = 1;
 
-                    	     lastAlertTime = now;
 
-                    	     printf("Last Alert = %lu\r\n", lastAlertTime);
-                          outsideCount = 0;
+                    	  // reduce to 20 sec ofr testing
+                    	  osStatus_t timerStatus = osTimerStart(
+                    	      gpsTimeoutTimerHandle,
+                    	      20000);
 
-                          printf("GEOFENCE BREACH!\r\n");
+                    	  printf("Timer Start Status = %d\r\n",
+                    	         timerStatus);
 
-                          uint32_t alert = 1;
+                    	  printf("GEOFENCE BREACH!\r\n");
 
-                          osMessageQueuePut(
-                              alertQueueHandle,
-                              &alert,
-                              0,
-                              0);
+                    	  uint32_t alert = 1;
+
+                    	  osMessageQueuePut(
+                    	      alertQueueHandle,
+                    	      &alert,
+                    	      0,
+                    	      0);
+
+
+                    	  // before software timer (working)
+//                    	  printf("Tick = %lu\r\n", now);
+//
+//                    	     lastAlertTime = now;
+//
+//                    	     printf("Last Alert = %lu\r\n", lastAlertTime);
+//                          outsideCount = 0;
+//
+//                          printf("GEOFENCE BREACH!\r\n");
+//
+//                          uint32_t alert = 1;
+//
+//                          osMessageQueuePut(
+//                              alertQueueHandle,
+//                              &alert,
+//                              0,
+//                              0);
 //                    	    printf("GPS Queue = %p\r\n", alertQueueHandle);
 //
 //                    	    printf("Put status = %d\r\n", status);
@@ -1307,8 +1369,27 @@ void StartGPSTask(void *argument)
                   systemEventsHandle,
                   MOTION_DETECTED_BIT);
 
+              osTimerStop(gpsFixTimerHandle);
+              fixAcquired = 0;
+
               break;
           }
+
+      if(gpsFixTimeout)
+      {
+          printf("GPS Fix Not Acquired - Sleep\r\n");
+
+          gpsFixTimeout = 0;
+
+          osEventFlagsClear(
+              systemEventsHandle,
+              MOTION_DETECTED_BIT);
+
+          fixAcquired = 0;
+          osTimerStop(gpsFixTimerHandle);
+
+          break;
+      }
 
 
     }
@@ -1394,8 +1475,23 @@ void gpsTimerCallback01(void *argument)
 {
   /* USER CODE BEGIN gpsTimerCallback01 */
 
+    alertCooldownActive = 0;
 
+//    HAL_GPIO_TogglePin(
+//        LED2_GPIO_Port,
+//        LED2_Pin);
+    printf("TIMER EXPIRED\r\n");
   /* USER CODE END gpsTimerCallback01 */
+}
+
+/* gpsFixTimerCallback function */
+void gpsFixTimerCallback(void *argument)
+{
+  /* USER CODE BEGIN gpsFixTimerCallback */
+    gpsFixTimeout = 1;
+
+    printf("GPS FIX TIMEOUT\r\n");
+  /* USER CODE END gpsFixTimerCallback */
 }
 
 /**
