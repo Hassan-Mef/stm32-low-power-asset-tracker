@@ -101,6 +101,9 @@ volatile uint8_t alertCooldownActive = 0;
 //
 
 volatile uint8_t gpsFixTimeout = 0;
+
+volatile uint8_t wakeFlag = 0;
+
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -436,11 +439,23 @@ static void MEMS_Init(void)
     LSM6DSL_ACC_SetOutputDataRate(&MotionSensor, 26.0f);
     LSM6DSL_ACC_SetFullScale(&MotionSensor, 4);
 
-    LSM6DSL_ACC_Set_INT1_DRDY(&MotionSensor, ENABLE);
+//    LSM6DSL_ACC_Set_INT1_DRDY(&MotionSensor, ENABLE);
 
     LSM6DSL_ACC_GetAxesRaw(&MotionSensor, &axes);
 
     LSM6DSL_ACC_Enable(&MotionSensor);
+
+    LSM6DSL_ACC_Set_Wake_Up_Threshold(
+        &MotionSensor,
+        3);
+
+    LSM6DSL_ACC_Set_Wake_Up_Duration(
+        &MotionSensor,
+        0);
+
+    LSM6DSL_ACC_Enable_Wake_Up_Detection(
+        &MotionSensor,
+        LSM6DSL_INT1_PIN);
 }
 
 
@@ -1071,12 +1086,14 @@ static void MX_GPIO_Init(void)
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
 
-//	 printf("EXTI %d\r\n", GPIO_Pin);
+
+
     if(GPIO_Pin == GPIO_PIN_11)
     {
 //        dataRdyIntReceived++
     	 osSemaphoreRelease(
     	            motionSemaphoreHandle);;
+    	wakeFlag= 1;
     }
 }
 /* USER CODE END 4 */
@@ -1094,61 +1111,32 @@ void StartDefaultTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
+//	    printf("Entering STOP1 in 5 sec...\r\n");
 //
-//	  static uint32_t counter = 0;
+//	    osDelay(5000);
 //
-//	  counter++;
+//	    printf("Entering STOP1 NOW\r\n");
 //
-//	  if(counter % 500 == 0)
+//
+//	    __WFI();
+//
+//	    printf("AFTER WFI\r\n");
+//	    printf("WAKEUP FROM STOP1\r\n");
+//	  if(wakeFlag)
 //	  {
-//	      printf("Default Alive\r\n");
+//		LSM6DSL_Event_Status_t status;
+//
+//		    LSM6DSL_ACC_Get_Event_Status(
+//		        &MotionSensor,
+//		        &status);
+//
+//		    printf(" Wake=%d Sleep=%d\n",
+//		           status.WakeUpStatus,
+//		           status.SleepStatus);
+//		    wakeFlag =0;
 //	  }
-
-//	  	static int32_t motion = 0;
 //
-//	    if(dataRdyIntReceived)
-//	    {
-//	        dataRdyIntReceived = 0;
-//
-//	        LSM6DSL_Axes_t acc_axes;
-//
-//	        LSM6DSL_ACC_GetAxes(&MotionSensor, &acc_axes);
-//
-//	        // calculate motion detection
-//
-//	        int32_t dx = abs(acc_axes.x - prevX);
-//	        int32_t dy = abs(acc_axes.y - prevY);
-//	        int32_t dz = abs(acc_axes.z - prevZ);
-//
-//	        motion = dx + dy + dz;
-//
-//	        prevX = acc_axes.x;
-//	        prevY = acc_axes.y;
-//	        prevZ = acc_axes.z;
-//
-////	        printf("X=%ld Y=%ld Z=%ld\r\n",
-////	               acc_axes.x,
-////	               acc_axes.y,
-////	               acc_axes.z);
-//
-////	        printf("Motion=%ld\r\n", motion);
-//	    }
-//
-//	    osDelay(10);
-//
-//	    if(motion > MOTION_THRESHOLD)
-//	    {
-//	        uint32_t now = HAL_GetTick();
-//
-//	        if((now - lastMotionTick) > 3000)
-//	        {
-//	            lastMotionTick = now;
-//
-//	            osSemaphoreRelease(motionSemaphoreHandle);
-//	        }
-//	    }
-
-	    osDelay(1000);
+	    osDelay(100);
 
   }
   /* USER CODE END 5 */
@@ -1434,7 +1422,7 @@ void StartGPSTask(void *argument)
 
                   }
               }
-          
+
       }
       else if(status == HAL_TIMEOUT)
       {
