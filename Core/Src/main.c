@@ -380,16 +380,23 @@ void parseGPGGA(char *sentence)
 
     int fixQuality;
 
+//    printf("GGA PARSED\r\n");
+
     float hdop;
 
-    sscanf(sentence,
-           "$GPGGA,%*[^,],%f,%c,%f,%c,%d,%*d,%f",
-           &lat,
-           &ns,
-           &lon,
-           &ew,
-           &fixQuality,
-           &hdop);
+    char *start = strchr(sentence, ',');
+
+    if(start != NULL)
+    {
+        sscanf(start,
+               ",%*[^,],%f,%c,%f,%c,%d,%*d,%f",
+               &lat,
+               &ns,
+               &lon,
+               &ew,
+               &fixQuality,
+               &hdop);
+    }
 
     currentGPS.fixQuality = fixQuality;
     currentGPS.hdop = hdop;
@@ -436,6 +443,18 @@ static void MEMS_Init(void)
     LSM6DSL_ACC_Enable(&MotionSensor);
 }
 
+
+// GPS POwer off mode code
+
+void GPS_PowerOn(void)
+{
+    printf("GPS POWER ON\r\n");
+}
+
+void GPS_PowerOff(void)
+{
+    printf("GPS POWER OFF\r\n");
+}
 
 /* USER CODE END 0 */
 
@@ -1237,6 +1256,7 @@ void StartGPSTask(void *argument)
 		          osWaitForever);
 
 		      printf("GPS Activated\r\n");
+		      GPS_PowerOn();
 
 		      gpsFixTimeout = 0;
 		      fixAcquired = 0;
@@ -1274,18 +1294,24 @@ void StartGPSTask(void *argument)
               line[idx] = '\0';
               idx = 0;
 
+
+              if(strstr(line, "$GPGGA") ||
+                 strstr(line, "$GNGGA"))
+              {
+            	  // for debugging stage
+//            	   printf("%s\r\n", line);
+                  parseGPGGA(line);
+              }
+
               if(strstr(line, "$GPRMC") ||
                  strstr(line, "$GNRMC"))
               {
                   parseGPRMC(line);
 
-                  if(strstr(line, "$GPGGA") ||
-                     strstr(line, "$GNGGA"))
-                  {
-                      parseGPGGA(line);
-                  }
 
-                  if(currentGPS.validFix)
+                  if(currentGPS.validFix &&
+                     currentGPS.fixQuality > 0 &&
+                     currentGPS.hdop < 3.0f)
                   {
 
                 	    if(fixAcquired == 0)
@@ -1424,6 +1450,8 @@ void StartGPSTask(void *argument)
       if((HAL_GetTick() - lastMotionTick) > 15000)
           {
               printf("No Motion - GPS Sleep\r\n");
+
+              GPS_PowerOff();
               outsideCount = 0;
 
               osEventFlagsClear(
@@ -1440,6 +1468,7 @@ void StartGPSTask(void *argument)
       {
           printf("GPS Fix Not Acquired - Sleep\r\n");
 
+          GPS_PowerOff();
           gpsFixTimeout = 0;
 
           osEventFlagsClear(
