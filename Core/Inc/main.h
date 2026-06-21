@@ -220,6 +220,8 @@ void Error_Handler(void);
 #define ISM43362_DRDY_EXTI1_GPIO_Port GPIOE
 
 /* USER CODE BEGIN Private defines */
+void PreSleepProcessing(uint32_t ulExpectedIdleTime);
+void PostSleepProcessing(uint32_t ulExpectedIdleTime);
 
 /* USER CODE END Private defines */
 

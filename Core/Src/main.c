@@ -109,6 +109,8 @@ volatile uint8_t wakeFlag = 0;
 /* Private variables ---------------------------------------------------------*/
 DFSDM_Channel_HandleTypeDef hdfsdm1_channel1;
 
+LPTIM_HandleTypeDef hlptim1;
+
 QSPI_HandleTypeDef hqspi;
 
 SPI_HandleTypeDef hspi3;
@@ -223,6 +225,9 @@ uint8_t alertActive = 0;
 //
 uint32_t lastAlertTime = 0;
 
+
+volatile uint32_t wakeInterruptCount = 0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -235,6 +240,7 @@ static void MX_USART1_UART_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_USB_OTG_FS_PCD_Init(void);
 static void MX_UART4_Init(void);
+static void MX_LPTIM1_Init(void);
 void StartDefaultTask(void *argument);
 void StartMotionTask(void *argument);
 void StartGPSTask(void *argument);
@@ -453,9 +459,9 @@ static void MEMS_Init(void)
         &MotionSensor,
         0);
 
-    LSM6DSL_ACC_Enable_Wake_Up_Detection(
-        &MotionSensor,
-        LSM6DSL_INT1_PIN);
+//    LSM6DSL_ACC_Enable_Wake_Up_Detection(
+//        &MotionSensor,
+//        LSM6DSL_INT1_PIN);
 }
 
 
@@ -471,6 +477,32 @@ void GPS_PowerOff(void)
     printf("GPS POWER OFF\r\n");
 }
 
+
+// GPS Power Function
+
+void EnterStopMode(void)
+{
+	printf("Wake Count Before Sleep = %lu\r\n",
+	       wakeInterruptCount);
+    printf("Entering STOP1\r\n");
+
+    uint32_t before = HAL_GetTick();
+
+    __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_11);
+
+    HAL_PWREx_EnterSTOP1Mode(
+        PWR_STOPENTRY_WFI);
+
+    uint32_t after = HAL_GetTick();
+
+    SystemClock_Config();
+
+    printf("Woke From STOP1 after %lu ms\r\n",
+           after - before);
+
+    printf("Wake Count After Sleep = %lu\r\n",
+           wakeInterruptCount);
+}
 /* USER CODE END 0 */
 
 /**
@@ -508,9 +540,10 @@ int main(void)
   MX_USART3_UART_Init();
   MX_USB_OTG_FS_PCD_Init();
   MX_UART4_Init();
+  MX_LPTIM1_Init();
   /* USER CODE BEGIN 2 */
 
-  MEMS_Init();
+
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -569,6 +602,7 @@ int main(void)
   systemEventsHandle = osEventFlagsNew(&systemEvents_attributes);
 
   /* USER CODE BEGIN RTOS_EVENTS */
+  MEMS_Init();
   /* add events, ... */
   /* USER CODE END RTOS_EVENTS */
 
@@ -682,6 +716,40 @@ static void MX_DFSDM1_Init(void)
   /* USER CODE BEGIN DFSDM1_Init 2 */
 
   /* USER CODE END DFSDM1_Init 2 */
+
+}
+
+/**
+  * @brief LPTIM1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_LPTIM1_Init(void)
+{
+
+  /* USER CODE BEGIN LPTIM1_Init 0 */
+
+  /* USER CODE END LPTIM1_Init 0 */
+
+  /* USER CODE BEGIN LPTIM1_Init 1 */
+
+  /* USER CODE END LPTIM1_Init 1 */
+  hlptim1.Instance = LPTIM1;
+  hlptim1.Init.Clock.Source = LPTIM_CLOCKSOURCE_APBCLOCK_LPOSC;
+  hlptim1.Init.Clock.Prescaler = LPTIM_PRESCALER_DIV1;
+  hlptim1.Init.Trigger.Source = LPTIM_TRIGSOURCE_SOFTWARE;
+  hlptim1.Init.OutputPolarity = LPTIM_OUTPUTPOLARITY_HIGH;
+  hlptim1.Init.UpdateMode = LPTIM_UPDATE_IMMEDIATE;
+  hlptim1.Init.CounterSource = LPTIM_COUNTERSOURCE_INTERNAL;
+  hlptim1.Init.Input1Source = LPTIM_INPUT1SOURCE_GPIO;
+  hlptim1.Init.Input2Source = LPTIM_INPUT2SOURCE_GPIO;
+  if (HAL_LPTIM_Init(&hlptim1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN LPTIM1_Init 2 */
+
+  /* USER CODE END LPTIM1_Init 2 */
 
 }
 
@@ -1083,17 +1151,24 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+uint32_t flags;
+
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
 
 
-
     if(GPIO_Pin == GPIO_PIN_11)
     {
-//        dataRdyIntReceived++
-    	 osSemaphoreRelease(
-    	            motionSemaphoreHandle);;
-    	wakeFlag= 1;
+//        printf("EXTI IRQ\r\n");
+    	wakeInterruptCount++;
+
+    	if(motionSemaphoreHandle != NULL)
+    	        {
+    		flags =osSemaphoreRelease(
+    	                motionSemaphoreHandle);
+    	        }
+
+
     }
 }
 /* USER CODE END 4 */
@@ -1135,8 +1210,16 @@ void StartDefaultTask(void *argument)
 //		           status.SleepStatus);
 //		    wakeFlag =0;
 //	  }
+
+//	  printf("WakeCount=%lu\r\n",
+//	            wakeInterruptCount);
+
+	  // removed thi
+//	    printf("Tick=%lu\r\n", osKernelGetTickCount());
+
+
 //
-	    osDelay(100);
+	    osDelay(1000);
 
   }
   /* USER CODE END 5 */
@@ -1153,6 +1236,13 @@ void StartMotionTask(void *argument)
 {
   /* USER CODE BEGIN StartMotionTask */
   /* Infinite loop */
+
+	printf("Motion Task Started\r\n");
+	osDelay(1000);
+
+	LSM6DSL_ACC_Enable_Wake_Up_Detection(
+	    &MotionSensor,
+	    LSM6DSL_INT1_PIN);
   for(;;)
   {
 //	  	static int32_t motion = 0;
@@ -1161,13 +1251,23 @@ void StartMotionTask(void *argument)
 //	  	    {
 //	  	        dataRdyIntReceived = 0;
 
-	  osSemaphoreAcquire(
-	        motionSemaphoreHandle,
-	        osWaitForever);
+	  osStatus_t status =
+	      osSemaphoreAcquire(
+	          motionSemaphoreHandle,
+	          osWaitForever);
+
+//	  printf("Acquire=%d\r\n", status);
+
+//	  printf("SEMAPHORE\r\n");
 
 	  	        LSM6DSL_Axes_t acc_axes;
 
 	  	        LSM6DSL_ACC_GetAxes(&MotionSensor, &acc_axes);
+
+//	  	      printf("X=%ld Y=%ld Z=%ld\r\n",
+//	  	             acc_axes.x,
+//	  	             acc_axes.y,
+//	  	             acc_axes.z);
 
 	  	        int32_t dx = abs(acc_axes.x - prevX);
 	  	        int32_t dy = abs(acc_axes.y - prevY);
@@ -1175,15 +1275,26 @@ void StartMotionTask(void *argument)
 
 	  	        int32_t motion = dx + dy + dz;
 
+//	  	      printf("Motion=%ld dx=%ld dy=%ld dz=%ld\r\n",
+//	  	             motion,
+//	  	             dx,
+//	  	             dy,
+//	  	             dz);
+
 	  	        prevX = acc_axes.x;
 	  	        prevY = acc_axes.y;
 	  	        prevZ = acc_axes.z;
 
 	  	        if(motion > MOTION_THRESHOLD)
 	  	        {
-	  	            uint32_t now = HAL_GetTick();
+	  	        	uint32_t now = osKernelGetTickCount();
 
-	  	            if((now - lastMotionTick) > 3000)
+
+//	  	          printf("Tick=%lu Motion=%ld\r\n",
+//	  	                 now,
+//	  	                 motion);
+
+	  	            if((now - lastMotionTick) > 30)
 	  	            {
 	  	                lastMotionTick = now;
 
@@ -1199,7 +1310,7 @@ void StartMotionTask(void *argument)
 	  	        }
 //	  	    }
 
-	  	    osDelay(10);
+//	  	    osDelay(10);
 
 
 //	  osSemaphoreAcquire(motionSemaphoreHandle, osWaitForever);
@@ -1435,12 +1546,13 @@ void StartGPSTask(void *argument)
 
       // MOtion Timeout
 
-      if((HAL_GetTick() - lastMotionTick) > 15000)
+      if((osKernelGetTickCount() - lastMotionTick) > 15000)
           {
               printf("No Motion - GPS Sleep\r\n");
 
               GPS_PowerOff();
               outsideCount = 0;
+
 
               osEventFlagsClear(
                   systemEventsHandle,
@@ -1448,6 +1560,10 @@ void StartGPSTask(void *argument)
 
               osTimerStop(gpsFixTimerHandle);
               fixAcquired = 0;
+
+//              HAL_UART_DeInit(&huart4);
+
+//              EnterStopMode();
 
               break;
           }

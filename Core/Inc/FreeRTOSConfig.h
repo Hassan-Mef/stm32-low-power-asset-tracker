@@ -63,10 +63,11 @@
 #define configUSE_PREEMPTION                     1
 #define configSUPPORT_STATIC_ALLOCATION          1
 #define configSUPPORT_DYNAMIC_ALLOCATION         1
-#define configUSE_IDLE_HOOK                      0
+#define configUSE_IDLE_HOOK                      1
 #define configUSE_TICK_HOOK                      0
 #define configCPU_CLOCK_HZ                       ( SystemCoreClock )
-#define configTICK_RATE_HZ                       ((TickType_t)1000)
+//#define configTICK_RATE_HZ                       ((TickType_t)1000)
+#define configTICK_RATE_HZ                       1000
 #define configMAX_PRIORITIES                     ( 56 )
 #define configMINIMAL_STACK_SIZE                 ((uint16_t)128)
 #define configTOTAL_HEAP_SIZE                    ((size_t)7500)
@@ -78,10 +79,19 @@
 #define configUSE_RECURSIVE_MUTEXES              1
 #define configUSE_COUNTING_SEMAPHORES            1
 #define configUSE_PORT_OPTIMISED_TASK_SELECTION  0
+#define configUSE_TICKLESS_IDLE                  2
 /* USER CODE BEGIN MESSAGE_BUFFER_LENGTH_TYPE */
 /* Defaults to size_t for backward compatibility, but can be changed
    if lengths will always be less than the number of bytes in a size_t. */
 #define configMESSAGE_BUFFER_LENGTH_TYPE         size_t
+
+#define configPRE_SLEEP_PROCESSING   PreSleepProcessing
+#define configPOST_SLEEP_PROCESSING  PostSleepProcessing
+
+#define configEXPECTED_IDLE_TIME_BEFORE_SLEEP    2
+#define configLPTIM_ENABLE_PRECISION             1
+#define configLPTIM_REF_CLOCK_HZ                 32768
+#define configLPTIM_INSTANCE                     LPTIM1
 /* USER CODE END MESSAGE_BUFFER_LENGTH_TYPE */
 
 /* Co-routine definitions. */
