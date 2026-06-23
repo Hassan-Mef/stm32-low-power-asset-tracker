@@ -80,7 +80,7 @@ typedef struct
 //#define GEOFENCE_LON      74.3587f
 #define GEOFENCE_LAT  31.544230f
 #define GEOFENCE_LON  74.285126f
-#define GEOFENCE_RADIUS   50.0f
+#define GEOFENCE_RADIUS   7.0f     // it is 50.0f for testing reduced
 
 // Accelorometer
 #define LSM6DSL_ADDR        (0x6A << 1)
@@ -89,23 +89,19 @@ typedef struct
 // motion Threshold
 #define MOTION_THRESHOLD 20
 
-volatile uint8_t timerFired = 0;
-
 
 // cooldown
 
 #define ALERT_COOLDOWN_MS 60000
 
-// global flag for cooldown timer
-
-volatile uint8_t alertCooldownActive = 0;
 
 
-//
+// Log Helper function
 
-volatile uint8_t gpsFixTimeout = 0;
-
-volatile uint8_t wakeFlag = 0;
+#define LOG(fmt, ...) \
+    printf("[%lu] " fmt, \
+           osKernelGetTickCount(), \
+           ##__VA_ARGS__)
 
 /* USER CODE END PM */
 
@@ -186,16 +182,16 @@ GPS_Data_t currentGPS;
 
 
 // testing functionality variables
-
-float inside_latitude = 31.5204 ;
-float inside_longitude= 74.3587 ;
-
-float outside_latitude = 31.5300 ;
-float outside_longitude= 74.4000 ;
-
-// toggling funcion
-
-static uint8_t toggleLocation = 0;
+//
+//float inside_latitude = 31.5204 ;
+//float inside_longitude= 74.3587 ;
+//
+//float outside_latitude = 31.5300 ;
+//float outside_longitude= 74.4000 ;
+//
+//// toggling funcion
+//
+//static uint8_t toggleLocation = 0;
 
 
 // Global Counter  upto 3
@@ -232,6 +228,20 @@ uint32_t lastAlertTime = 0;
 
 
 volatile uint32_t wakeInterruptCount = 0;
+
+
+// global flag for cooldown timer
+
+volatile uint8_t alertCooldownActive = 0;
+
+
+volatile uint8_t gpsFixTimeout = 0;
+
+volatile uint8_t wakeFlag = 0;
+
+
+// motion inital values detection fix
+static uint8_t firstSample = 1;
 
 /* USER CODE END PV */
 
@@ -438,11 +448,11 @@ static void MEMS_Init(void)
 
     LSM6DSL_ReadID(&MotionSensor, &id);
 
-    printf("LSM6DSL ID = 0x%02X\r\n", id);
+    LOG("LSM6DSL ID = 0x%02X\r\n", id);
 
     if(id != LSM6DSL_ID)
     {
-        printf("Sensor not found!\r\n");
+        LOG("Sensor not found!\r\n");
         Error_Handler();
     }
 
@@ -475,42 +485,42 @@ static void MEMS_Init(void)
 
 void GPS_PowerOn(void)
 {
-    printf("GPS POWER ON\r\n");
+    LOG("GPS POWER ON\r\n");
     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_0, GPIO_PIN_SET);
 }
 
 void GPS_PowerOff(void)
 {
-    printf("GPS POWER OFF\r\n");
+    LOG("GPS POWER OFF\r\n");
     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_0, GPIO_PIN_RESET);
 }
 
 
 // GPS Power Function
-
-void EnterStopMode(void)
-{
-	printf("Wake Count Before Sleep = %lu\r\n",
-	       wakeInterruptCount);
-    printf("Entering STOP1\r\n");
-
-    uint32_t before = HAL_GetTick();
-
-    __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_11);
-
-    HAL_PWREx_EnterSTOP1Mode(
-        PWR_STOPENTRY_WFI);
-
-    uint32_t after = HAL_GetTick();
-
-    SystemClock_Config();
-
-    printf("Woke From STOP1 after %lu ms\r\n",
-           after - before);
-
-    printf("Wake Count After Sleep = %lu\r\n",
-           wakeInterruptCount);
-}
+// Manual Stop Mode 1 entry experiment
+//void EnterStopMode(void)
+//{
+//	printf("Wake Count Before Sleep = %lu\r\n",
+//	       wakeInterruptCount);
+//    printf("Entering STOP1\r\n");
+//
+//    uint32_t before = HAL_GetTick();
+//
+//    __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_11);
+//
+//    HAL_PWREx_EnterSTOP1Mode(
+//        PWR_STOPENTRY_WFI);
+//
+//    uint32_t after = HAL_GetTick();
+//
+//    SystemClock_Config();
+//
+//    printf("Woke From STOP1 after %lu ms\r\n",
+//           after - before);
+//
+//    printf("Wake Count After Sleep = %lu\r\n",
+//           wakeInterruptCount);
+//}
 /* USER CODE END 0 */
 
 /**
@@ -1299,7 +1309,7 @@ void StartMotionTask(void *argument)
   /* USER CODE BEGIN StartMotionTask */
   /* Infinite loop */
 
-	printf("Motion Task Started\r\n");
+	LOG("Motion Task Started\r\n");
 	osDelay(1000);
 
 	LSM6DSL_ACC_Enable_Wake_Up_Detection(
@@ -1307,11 +1317,6 @@ void StartMotionTask(void *argument)
 	    LSM6DSL_INT1_PIN);
   for(;;)
   {
-//	  	static int32_t motion = 0;
-
-//	  	if(dataRdyIntReceived)
-//	  	    {
-//	  	        dataRdyIntReceived = 0;
 
 	  osStatus_t status =
 	      osSemaphoreAcquire(
@@ -1325,6 +1330,18 @@ void StartMotionTask(void *argument)
 	  	        LSM6DSL_Axes_t acc_axes;
 
 	  	        LSM6DSL_ACC_GetAxes(&MotionSensor, &acc_axes);
+
+
+	  	      if(firstSample)
+	  	      {
+	  	          prevX = acc_axes.x;
+	  	          prevY = acc_axes.y;
+	  	          prevZ = acc_axes.z;
+
+	  	          firstSample = 0;
+
+	  	          continue;
+	  	      }
 
 //	  	      printf("X=%ld Y=%ld Z=%ld\r\n",
 //	  	             acc_axes.x,
@@ -1370,16 +1387,6 @@ void StartMotionTask(void *argument)
 	  	                    MOTION_DETECTED_BIT);
 	  	            }
 	  	        }
-//	  	    }
-
-//	  	    osDelay(10);
-
-
-//	  osSemaphoreAcquire(motionSemaphoreHandle, osWaitForever);
-//	  printf("Motion DETECTED \r\n");
-//
-//	  osEventFlagsSet(systemEventsHandle, MOTION_DETECTED_BIT);
-//	  osDelay(1000);
 
   }
   /* USER CODE END StartMotionTask */
@@ -1401,9 +1408,8 @@ void StartGPSTask(void *argument)
 	uint32_t idx = 0;
 	uint8_t ch;
 
-//	uint32_t sentenceCount = 0;
 
-	printf("GPS Task Started\r\n");
+	LOG("GPS Task Started\r\n");
 	static uint8_t fixAcquired = 0;
 
 	//osDelay(3000);
@@ -1416,7 +1422,7 @@ void StartGPSTask(void *argument)
 		          osFlagsWaitAny,
 		          osWaitForever);
 
-		      printf("GPS Activated\r\n");
+		      LOG("GPS Activated\r\n");
 		      GPS_PowerOn();
 		      osDelay(5000);
 
@@ -1427,11 +1433,7 @@ void StartGPSTask(void *argument)
 		          gpsFixTimerHandle,
 		          120000);   // or 20000 for testing
 
-//	    if(timerFired)
-//	    {
-//	        timerFired = 0;
-//	        printf("Timer Fired!\r\n");
-//	    }
+
 
 		while(1)
 		{
@@ -1500,24 +1502,24 @@ void StartGPSTask(void *argument)
                               currentGPS.latitude,
                               currentGPS.longitude);
 
-                      printf("\r\nGPS Fix Acquired\r\n");
+                      LOG("\r\nGPS Fix Acquired\r\n");
 
-                      printf("Lat: %.6f\r\n",
+                      LOG("Lat: %.6f\r\n",
                              currentGPS.latitude);
 
-                      printf("Lon: %.6f\r\n",
+                      LOG("Lon: %.6f\r\n",
                              currentGPS.longitude);
 
-                      printf("Distance = %.2f m\r\n",
+                      LOG("Distance = %.2f m\r\n",
                              distance);
 
-                      printf("Speed = %.2f km/h\r\n",
+                      LOG("Speed = %.2f km/h\r\n",
                              currentGPS.speed);
 
-                      printf("Fix Quality = %d\r\n",
+                      LOG("Fix Quality = %d\r\n",
                              currentGPS.fixQuality);
 
-                      printf("HDOP = %.2f\r\n",
+                      LOG("HDOP = %.2f\r\n",
                              currentGPS.hdop);
                       if(distance > GEOFENCE_RADIUS)
                       {
@@ -1526,7 +1528,7 @@ void StartGPSTask(void *argument)
                     	          outsideCount++;
                     	      }
 
-                          printf("Outside Count = %d\r\n",
+                          LOG("Outside Count = %d\r\n",
                                  outsideCount);
                       }
                       else
@@ -1537,10 +1539,10 @@ void StartGPSTask(void *argument)
 
                       // -----DEBUGING ____
 //                      uint32_t now = HAL_GetTick();
-//                      printf("Tick = %lu\r\n", now);
+//                      LOG("Tick = %lu\r\n", now);
 
                       // -----DEBUGING ____
-//                      printf("Cooldown=%d\r\n",
+//                      LOG("Cooldown=%d\r\n",
 //                             alertCooldownActive);
 
                       if(outsideCount >= 3 &&
@@ -1556,10 +1558,10 @@ void StartGPSTask(void *argument)
                     	      60000);
 
                     	  // -----DEBUGING ____
-//                    	  printf("Timer Start Status = %d\r\n",
+//                    	  LOG("Timer Start Status = %d\r\n",
 //                    	         timerStatus);
 
-                    	  printf("GEOFENCE BREACH!\r\n");
+                    	  LOG("GEOFENCE BREACH!\r\n");
 
                     	  uint32_t alert = 1;
 
@@ -1570,35 +1572,7 @@ void StartGPSTask(void *argument)
                     	      0);
 
 
-                    	  // before software timer (working)
-//                    	  printf("Tick = %lu\r\n", now);
-//
-//                    	     lastAlertTime = now;
-//
-//                    	     printf("Last Alert = %lu\r\n", lastAlertTime);
-//                          outsideCount = 0;
-//
-//                          printf("GEOFENCE BREACH!\r\n");
-//
-//                          uint32_t alert = 1;
-//
-//                          osMessageQueuePut(
-//                              alertQueueHandle,
-//                              &alert,
-//                              0,
-//                              0);
-//                    	    printf("GPS Queue = %p\r\n", alertQueueHandle);
-//
-//                    	    printf("Put status = %d\r\n", status);
-//
-//                    	    osStatus_t timerStatus =
-//                    	        osTimerStart(
-//                    	            gpsTimeoutTimerHandle,
-//                    	            5000);
-//
-//
-//                    	    printf("Timer Start = %d\r\n",
-//                    	           timerStatus);
+                    	  // before software timer (working
 
 
 
@@ -1615,14 +1589,14 @@ void StartGPSTask(void *argument)
       }
       else
       {
-          printf("[UART ERROR]\r\n");
+          LOG("[UART ERROR]\r\n");
       }
 
       // MOtion Timeout
 
       if((osKernelGetTickCount() - lastMotionTick) > 10000)
           {
-              printf("No Motion - GPS Sleep\r\n");
+              LOG("No Motion - GPS Sleep\r\n");
 
               GPS_PowerOff();
               outsideCount = 0;
@@ -1635,16 +1609,13 @@ void StartGPSTask(void *argument)
               osTimerStop(gpsFixTimerHandle);
               fixAcquired = 0;
 
-//              HAL_UART_DeInit(&huart4);
-
-//              EnterStopMode();
 
               break;
           }
 
       if(gpsFixTimeout)
       {
-          printf("GPS Fix Not Acquired - Sleep\r\n");
+          LOG("GPS Fix Not Acquired - Sleep\r\n");
 
           GPS_PowerOff();
           gpsFixTimeout = 0;
@@ -1680,7 +1651,7 @@ void StartBuzzerTask(void *argument)
     uint32_t alert;
     osStatus_t status;
 
-    printf("Buzzer Task Started\r\n");
+    LOG("Buzzer Task Started\r\n");
   for(;;)
   {
 //	  printf("Waiting for alert...\r\n");
@@ -1702,7 +1673,7 @@ void StartBuzzerTask(void *argument)
 
 	        if(status == osOK)
 	        {
-	            printf("BUZZER ALERT RECEIVED!\r\n");
+	            LOG("BUZZER ALERT RECEIVED!\r\n");
 
 	            HAL_GPIO_TogglePin(
 	                    LED2_GPIO_Port,
