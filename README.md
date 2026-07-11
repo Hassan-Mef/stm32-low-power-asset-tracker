@@ -40,7 +40,7 @@ Unlike traditional GPS trackers that continuously consume power, this implementa
 
 # 📂 System Architecture
 
-[/images/system_architecture.png]
+(/images/system_architecture.png)
 
 
 ---
