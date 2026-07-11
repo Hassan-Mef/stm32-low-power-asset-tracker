@@ -78,9 +78,9 @@ typedef struct
 
 //#define GEOFENCE_LAT      31.5204f
 //#define GEOFENCE_LON      74.3587f
-#define GEOFENCE_LAT  31.544230f
-#define GEOFENCE_LON  74.285126f
-#define GEOFENCE_RADIUS   7.0f     // it is 50.0f for testing reduced
+#define GEOFENCE_LAT  31.515398f
+#define GEOFENCE_LON  74.465340f
+#define GEOFENCE_RADIUS   16.0f     // it is 50.0f for testing reduced
 
 // Accelorometer
 #define LSM6DSL_ADDR        (0x6A << 1)
@@ -89,7 +89,12 @@ typedef struct
 // motion Threshold
 #define MOTION_THRESHOLD 20
 
-
+#define MOTION_TIMEOUT_MS      10000
+#define GPS_STARTUP_DELAY_MS    5000
+#define GPS_FIX_TIMEOUT_MS    120000
+#define BUZZER_ON_TIME_MS        500
+#define BUZZER_OFF_TIME_MS       300
+#define BUZZER_REPEAT_COUNT        5
 // cooldown
 
 #define ALERT_COOLDOWN_MS 60000
@@ -1424,14 +1429,14 @@ void StartGPSTask(void *argument)
 
 		      LOG("GPS Activated\r\n");
 		      GPS_PowerOn();
-		      osDelay(5000);
+		      osDelay(GPS_STARTUP_DELAY_MS);
 
 		      gpsFixTimeout = 0;
 		      fixAcquired = 0;
 
 		      osTimerStart(
 		          gpsFixTimerHandle,
-		          120000);   // or 20000 for testing
+				  GPS_FIX_TIMEOUT_MS);   // or 20000 for testing
 
 
 
@@ -1473,15 +1478,15 @@ void StartGPSTask(void *argument)
                   parseGPRMC(line);
 
 
-                  if(currentGPS.fixQuality != 1 && currentGPS.fixQuality != 2)
-                  {
-                      continue;
-                  }
-
-                  if(currentGPS.hdop <= 0.0f || currentGPS.hdop > 3.0f)
-                  {
-                      continue;
-                  }
+//                  if(currentGPS.fixQuality != 1 && currentGPS.fixQuality != 2)
+//                  {
+//                      continue;
+//                  }
+//
+//                  if(currentGPS.hdop <= 0.0f || currentGPS.hdop > 3.0f)
+//                  {
+//                      continue;
+//                  }
 
 
                   if(currentGPS.validFix &&
@@ -1555,7 +1560,7 @@ void StartGPSTask(void *argument)
                     	  // reduce to 20 sec ofr testing
                     	  osStatus_t timerStatus = osTimerStart(
                     	      gpsTimeoutTimerHandle,
-                    	      60000);
+							  ALERT_COOLDOWN_MS);
 
                     	  // -----DEBUGING ____
 //                    	  LOG("Timer Start Status = %d\r\n",
@@ -1594,7 +1599,7 @@ void StartGPSTask(void *argument)
 
       // MOtion Timeout
 
-      if((osKernelGetTickCount() - lastMotionTick) > 10000)
+      if((osKernelGetTickCount() - lastMotionTick) > MOTION_TIMEOUT_MS)
           {
               LOG("No Motion - GPS Sleep\r\n");
 
