@@ -40,11 +40,8 @@ Unlike traditional GPS trackers that continuously consume power, this implementa
 
 # 📂 System Architecture
 
-> **Placeholder:** Replace with exported PlantUML diagram.
+[/images/system_architecture.png]
 
-```text
-/images/system_architecture.png
-```
 
 ---
 
